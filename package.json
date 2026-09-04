@@ -1,6 +1,6 @@
 {
   "name": "friday-telegram-bot",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Bulletproof AI-style moderation bot named FRIDAY for Telegram",
   "main": "index.js",
   "scripts": {
