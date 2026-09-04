@@ -1,18 +1,27 @@
 const { Telegraf, Markup } = require('telegraf');
+const http = require('http');
 
-// बोट टोकन सीधे यहाँ जोड़ दिया गया है
+// 1. छोटा HTTP सर्वर ताकि Render की Web Service खुश रहे और पोर्ट एरर न आए
+const PORT = process.env.PORT || 3000;
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('FRIDAY Bot is online and running!\n');
+});
+
+server.listen(PORT, () => {
+  console.log(`HTTP Server is listening on port ${PORT}`);
+});
+
+// 2. टेलीग्राम बोट सेटअप
 const bot = new Telegraf('8804212194:AAGkCSQy3LgD_SVbLBaBREO3RGquKTChiyc');
 
-// यूजर स्टेट्स ट्रैक करने के लिए: { userId: { insults: 0, warnings: 0 } }
 const userStats = {}; 
 
-// सेफ वर्ड्स की लिस्ट (जैसे 'chhod', 'chhota', आदि)
 const safeWords = [
   'chhod', 'chhod do', 'chhodo', 'chhota', 'chhoti', 'chhotu', 
   'pachhayat', 'bachha', 'bachho', 'achha', 'achhi'
 ];
 
-// गालियों के एडवांस्ड पैटर्न्स
 const profanityPatterns = [
   /m\s*a\s*d\s*a\s*r\s*c\s*h\s*o\s*d/gi,
   /b\s*h\s*e\s*n\s*c\s*h\s*o\s*d/gi,
@@ -24,7 +33,6 @@ const profanityPatterns = [
   /s\s*h\s*i\s*t\s*(?!at)/gi
 ];
 
-// चेक करने के लिए कि यूजर एडमिन, ओनर या एनोनिमस चैनल है या नहीं
 async function isAuthorized(ctx, userId) {
   try {
     if (ctx.message && ctx.message.sender_chat) {
@@ -38,7 +46,6 @@ async function isAuthorized(ctx, userId) {
   }
 }
 
-// मुख्य मॉडरेशन और टेक्स्ट फिल्टरिंग लॉजिक
 bot.on('text', async (ctx) => {
   try {
     if (ctx.chat.type === 'private') return;
@@ -53,7 +60,6 @@ bot.on('text', async (ctx) => {
 
     const text = ctx.message.text.toLowerCase();
 
-    // स्टेप 1: सेफ वर्ड्स चेक करें
     let isSafe = false;
     for (const safeWord of safeWords) {
       if (text.includes(safeWord)) {
@@ -66,7 +72,6 @@ bot.on('text', async (ctx) => {
       return;
     }
 
-    // स्टेप 2: गाली डिटेक्ट करें
     let isProfane = false;
     for (const pattern of profanityPatterns) {
       if (pattern.test(text)) {
@@ -76,7 +81,6 @@ bot.on('text', async (ctx) => {
     }
 
     if (isProfane) {
-      // 1. मैसेज डिलीट करें
       await ctx.deleteMessage();
 
       if (!userStats[userId]) {
@@ -85,7 +89,6 @@ bot.on('text', async (ctx) => {
 
       userStats[userId].insults += 1;
 
-      // 2. 2 घंटे (120 मिनट) के लिए म्यूट करें
       const muteDurationHours = 2;
       const muteUntil = Math.floor(Date.now() / 1000) + (muteDurationHours * 60 * 60);
       
@@ -94,7 +97,6 @@ bot.on('text', async (ctx) => {
         permissions: { can_send_messages: false }
       });
 
-      // 3. गालियों की संख्या चेक करें (हर 10 पर वार्निंग)
       if (userStats[userId].insults >= 10) {
         userStats[userId].warnings += 1;
         userStats[userId].insults = 0; 
@@ -109,7 +111,6 @@ bot.on('text', async (ctx) => {
             ])
           );
         } else {
-          // तीसरा वार्निंग होने पर परमानेंट बैन
           await ctx.telegram.banChatMember(chatId, userId);
           await ctx.reply(
             `🚫 Protocol Finalized: ${userName} has been permanently banned due to 3 cumulative warnings (30 total profanity hits).`,
@@ -133,7 +134,6 @@ bot.on('text', async (ctx) => {
   }
 });
 
-// अनम्यूट बटन का एक्शन
 bot.action(/^unmute_(.+)$/, async (ctx) => {
   try {
     const userId = ctx.match[1];
@@ -158,7 +158,6 @@ bot.action(/^unmute_(.+)$/, async (ctx) => {
   }
 });
 
-// अनबैन बटन का एक्शन
 bot.action(/^unban_(.+)$/, async (ctx) => {
   try {
     const userId = ctx.match[1];
@@ -176,7 +175,8 @@ bot.action(/^unban_(.+)$/, async (ctx) => {
 });
 
 bot.launch();
-console.log('FRIDAY Background Moderation Bot is active with embedded token...');
+console.log('FRIDAY Web Service Bot is active...');
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
+  
