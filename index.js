@@ -13,7 +13,7 @@ server.listen(PORT, () => {
 });
 
 // 2. टेलीग्राम बोट सेटअप
-const bot = new Telegraf('8804212194:AAGkCSQy3LgD_SVbLBaBREO3RGquKTChiyc');
+const bot = new Telegraf('8842372632:AAFgX5OvLkX6bouVlDPn0unW-d_wVZWZ-HM');
 
 const userStats = {}; 
 
