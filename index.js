@@ -1,6 +1,7 @@
 const { Telegraf, Markup } = require('telegraf');
 
-const bot = new Telegraf(process.env.BOT_TOKEN);
+// बोट टोकन सीधे यहाँ जोड़ दिया गया है
+const bot = new Telegraf('8804212194:AAGkCSQy3LgD_SVbLBaBREO3RGquKTChiyc');
 
 // यूजर स्टेट्स ट्रैक करने के लिए: { userId: { insults: 0, warnings: 0 } }
 const userStats = {}; 
@@ -37,17 +38,15 @@ async function isAuthorized(ctx, userId) {
   }
 }
 
-// मुख्य मॉडरेशन और टेक्स्ट फिल्टरिंग लॉजिक (बिना किसी /start कमांड के डायरेक्ट बैकग्राउंड में काम करेगा)
+// मुख्य मॉडरेशन और टेक्स्ट फिल्टरिंग लॉजिक
 bot.on('text', async (ctx) => {
   try {
-    // अगर बोट किसी प्राइवेट चैट में है तो इग्नोर करें, सिर्फ ग्रुप्स/सुपरग्रुप्स पर काम करेगा
     if (ctx.chat.type === 'private') return;
 
     const userId = ctx.from.id;
     const userName = ctx.from.first_name || 'User';
     const chatId = ctx.chat.id;
 
-    // अगर भेजने वाला एडमिन या ओनर है, तो बोट कुछ नहीं करेगा
     if (await isAuthorized(ctx, userId)) {
       return;
     }
@@ -98,7 +97,7 @@ bot.on('text', async (ctx) => {
       // 3. गालियों की संख्या चेक करें (हर 10 पर वार्निंग)
       if (userStats[userId].insults >= 10) {
         userStats[userId].warnings += 1;
-        userStats[userId].insults = 0; // काउंटर रीसेट
+        userStats[userId].insults = 0; 
 
         const currentWarnings = userStats[userId].warnings;
 
@@ -121,7 +120,6 @@ bot.on('text', async (ctx) => {
           delete userStats[userId];
         }
       } else {
-        // नॉर्मल गाली पर म्यूट और टाइमिंग की जानकारी
         await ctx.reply(
           `🔇 ${userName} has been muted for ${muteDurationHours} hours.\nReason: Inappropriate language detected. (Strike ${userStats[userId].insults}/10)`,
           Markup.inlineKeyboard([
@@ -135,7 +133,7 @@ bot.on('text', async (ctx) => {
   }
 });
 
-// अनम्यूट बटन का एक्शन (सिर्फ एडमिन के लिए)
+// अनम्यूट बटन का एक्शन
 bot.action(/^unmute_(.+)$/, async (ctx) => {
   try {
     const userId = ctx.match[1];
@@ -160,7 +158,7 @@ bot.action(/^unmute_(.+)$/, async (ctx) => {
   }
 });
 
-// अनबैन बटन का एक्शन (सिर्फ एडमिन के लिए)
+// अनबैन बटन का एक्शन
 bot.action(/^unban_(.+)$/, async (ctx) => {
   try {
     const userId = ctx.match[1];
@@ -178,7 +176,7 @@ bot.action(/^unban_(.+)$/, async (ctx) => {
 });
 
 bot.launch();
-console.log('FRIDAY Background Moderation Bot is active...');
+console.log('FRIDAY Background Moderation Bot is active with embedded token...');
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
