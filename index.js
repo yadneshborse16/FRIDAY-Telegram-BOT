@@ -13,9 +13,8 @@ server.listen(PORT, () => {
 
 const bot = new Telegraf('8804212194:AAGkCSQy3LgD_SVbLBaBREO3RGquKTChiyc');
 
-// डेटा स्टोर करने के लिए
 const userStats = {}; 
-const customTriggers = {}; // { chatId: { keyword: responseText } }
+const customTriggers = {}; // { chatId: { keyword: { type, content, ... } } }
 
 const safeWords = [
   'chhod', 'chhod do', 'chhodo', 'chhota', 'chhoti', 'chhotu', 
@@ -42,7 +41,7 @@ async function isAuthorized(ctx, userId) {
   }
 }
 
-// 1. /add कमांड: किसी मैसेज को रिप्लाई करके `/add keyword` लिखना (सिर्फ एडमिन)
+// 1. /add कमांड: फाइल, फोटो, डॉक्यूमेंट या टेक्स्ट को कीवर्ड से सेव करना (सिर्फ एडमिन)
 bot.command('add', async (ctx) => {
   try {
     const chatId = ctx.chat.id;
@@ -54,7 +53,7 @@ bot.command('add', async (ctx) => {
 
     const args = ctx.message.text.split(' ');
     if (args.length < 2 || !ctx.message.reply_to_message) {
-      return ctx.reply("Usage: Reply to a message with `/add [keyword]`");
+      return ctx.reply("Usage: Reply to any message/file/APK with `/add [keyword]`");
     }
 
     const keyword = args[1].toLowerCase();
@@ -64,15 +63,33 @@ bot.command('add', async (ctx) => {
       customTriggers[chatId] = {};
     }
 
-    // मैसेज का टेक्स्ट या कैप्शन सेव करें
-    customTriggers[chatId][keyword] = targetMsg.text || targetMsg.caption || "[Media/File Saved]";
-    return ctx.reply(`✅ Success! Trigger /${keyword} has been added.`);
+    // चेक करें कि रिप्लाई किस तरह के कंटेंट पर किया गया है (APK, Document, Photo, Video, Text आदि)
+    let triggerData = {};
+
+    if (targetMsg.document) {
+      triggerData = { type: 'document', file_id: targetMsg.document.file_id, caption: targetMsg.caption || '' };
+    } else if (targetMsg.photo) {
+      // फोटो के कई साइज़ होते हैं, सबसे बड़े वाला (आखिरी इंडेक्स) लेते हैं
+      const photo = targetMsg.photo[targetMsg.photo.length - 1];
+      triggerData = { type: 'photo', file_id: photo.file_id, caption: targetMsg.caption || '' };
+    } else if (targetMsg.video) {
+      triggerData = { type: 'video', file_id: targetMsg.video.file_id, caption: targetMsg.caption || '' };
+    } else if (targetMsg.audio) {
+      triggerData = { type: 'audio', file_id: targetMsg.audio.file_id, caption: targetMsg.caption || '' };
+    } else if (targetMsg.text) {
+      triggerData = { type: 'text', text: targetMsg.text };
+    } else {
+      triggerData = { type: 'text', text: "[Unsupported media type]" };
+    }
+
+    customTriggers[chatId][keyword] = triggerData;
+    return ctx.reply(`✅ Success! Trigger /${keyword} has been linked to the replied item.`);
   } catch (error) {
     console.error('Add trigger error:', error);
   }
 });
 
-// 2. /added कमांड: सभी सेव किए गए कीवर्ड्स देखना (कोई भी कर सकता है)
+// 2. /added कमांड: सभी सेव किए गए कीवर्ड्स देखना
 bot.command('added', async (ctx) => {
   try {
     const chatId = ctx.chat.id;
@@ -158,14 +175,25 @@ bot.on('text', async (ctx) => {
     if (text.startsWith('/')) {
       const commandKey = text.substring(1).toLowerCase();
       if (customTriggers[chatId] && customTriggers[chatId][commandKey]) {
-        return ctx.reply(customTriggers[chatId][commandKey]);
+        const trigger = customTriggers[chatId][commandKey];
+        
+        // सेव किए गए टाइप के अनुसार फाइल या टेक्स्ट वापस भेजें
+        if (trigger.type === 'document') {
+          return ctx.replyWithDocument(trigger.file_id, { caption: trigger.caption });
+        } else if (trigger.type === 'photo') {
+          return ctx.replyWithPhoto(trigger.file_id, { caption: trigger.caption });
+        } else if (trigger.type === 'video') {
+          return ctx.replyWithVideo(trigger.file_id, { caption: trigger.caption });
+        } else if (trigger.type === 'audio') {
+          return ctx.replyWithAudio(trigger.file_id, { caption: trigger.caption });
+        } else {
+          return ctx.reply(trigger.text);
+        }
       }
-      return; // अगर नॉर्मल कमांड है तो मॉडरेशन में नहीं जाएगी
+      return; 
     }
 
-    // अगर भेजने वाला एडमिन या ओनर है
     const userIsAdmin = await isAuthorized(ctx, userId);
-
     const rawText = text.toLowerCase();
 
     // सेफ वर्ड्स चेक करें
@@ -179,10 +207,9 @@ bot.on('text', async (ctx) => {
 
     if (isSafe) return;
 
-    // टेक्स्ट को नॉर्मलाइज करें
+    // टेक्स्ट नॉर्मलाइज़र (सारे स्टार्स और स्पेसेस हटाकर गाली पकड़ना)
     const cleanedText = rawText.replace(/[\s\*\-\_\.\,\!\@\#\$\%\^\&\(\)\+\=\~\`]+/g, '');
 
-    // गाली मैच करें
     let isProfane = false;
     for (const badWord of badWordsList) {
       if (cleanedText.includes(badWord)) {
@@ -192,13 +219,11 @@ bot.on('text', async (ctx) => {
     }
 
     if (isProfane) {
-      // अगर एडमिन है -> सिर्फ मैसेज डिलीट, कोई म्यूट/बैन नहीं
       if (userIsAdmin) {
         await ctx.deleteMessage();
         return;
       }
 
-      // नॉर्मल यूजर के लिए सख्त एक्शन
       await ctx.deleteMessage();
 
       if (!userStats[userId]) {
@@ -320,7 +345,7 @@ bot.action(/^unban_(.+)$/, async (ctx) => {
 });
 
 bot.launch();
-console.log('FRIDAY V7 Custom Triggers & Moderation Bot is active...');
+console.log('FRIDAY V8 Media & Trigger Bot is active...');
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
