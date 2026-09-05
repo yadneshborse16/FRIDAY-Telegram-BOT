@@ -1,5 +1,6 @@
 const { Telegraf, Markup } = require('telegraf');
 const http = require('http');
+const fs = require('fs');
 
 const PORT = process.env.PORT || 3000;
 const server = http.createServer((req, res) => {
@@ -14,7 +15,30 @@ server.listen(PORT, () => {
 const bot = new Telegraf('8804212194:AAGkCSQy3LgD_SVbLBaBREO3RGquKTChiyc');
 
 const userStats = {}; 
-const customTriggers = {}; // { chatId: { keyword: { from_chat_id, message_id } } }
+
+// डेटा को परमानेंट सेव रखने के लिए फाइल हैंडलिंग
+const DATA_FILE = './triggers.json';
+let customTriggers = {};
+
+// अगर पहले से फाइल मौजूद है तो डेटा लोड करें
+if (fs.existsSync(DATA_FILE)) {
+  try {
+    const fileData = fs.readFileSync(DATA_FILE, 'utf8');
+    customTriggers = JSON.parse(fileData);
+  } catch (err) {
+    console.error('Error reading triggers file:', err);
+    customTriggers = {};
+  }
+}
+
+// डेटा सेव करने का फंक्शन
+function saveTriggers() {
+  try {
+    fs.writeFileSync(DATA_FILE, JSON.stringify(customTriggers, null, 2));
+  } catch (err) {
+    console.error('Error writing triggers file:', err);
+  }
+}
 
 const safeWords = [
   'chhod', 'chhod do', 'chhodo', 'chhota', 'chhoti', 'chhotu', 
@@ -52,7 +76,6 @@ bot.command('add', async (ctx) => {
     }
 
     const fullText = ctx.message.text.trim();
-    // `/add` के बाद का हिस्सा कीवर्ड बनेगा (जैसे 'movie box')
     const keyword = fullText.substring(4).trim().toLowerCase();
     
     if (!keyword || !ctx.message.reply_to_message) {
@@ -70,6 +93,7 @@ bot.command('add', async (ctx) => {
       message_id: targetMsg.message_id
     };
 
+    saveTriggers(); // फाइल में परमानेंट सेव करें
     return ctx.reply(`✅ Filter saved successfully for '${keyword}'!`);
   } catch (error) {
     console.error('Add filter error:', error);
@@ -111,6 +135,7 @@ bot.command('remove', async (ctx) => {
 
     if (customTriggers[chatId] && customTriggers[chatId][keyword]) {
       delete customTriggers[chatId][keyword];
+      saveTriggers(); // अपडेटेड लिस्ट सेव करें
       return ctx.reply(`🗑️ Filter '${keyword}' has been successfully removed.`);
     } else {
       return ctx.reply(`❌ Filter '${keyword}' does not exist.`);
@@ -146,7 +171,7 @@ bot.command('resetwarns', async (ctx) => {
   }
 });
 
-// टेक्स्ट मॉडरेशन और स्मार्ट फिल्टर चेकर (चाहे स्लैश हो या न हो)
+// टेक्स्ट मॉडरेशन और स्मार्ट फिल्टर चेकर
 bot.on('text', async (ctx) => {
   try {
     if (ctx.chat.type === 'private') return;
@@ -157,17 +182,15 @@ bot.on('text', async (ctx) => {
     const userName = ctx.from.first_name || 'User';
     const userIsAdmin = await isAuthorized(ctx, userId);
 
-    // यदि मैसेज `/add`, `/remove` जैसी कोई सिस्टम कमांड है, तो इसे बाईपास करें
     if (text.startsWith('/add') || text.startsWith('/remove') || text.startsWith('/added') || text.startsWith('/resetwarns')) {
       return;
     }
 
-    // अगर यूजर ने आगे '/' लगाया है (जैसे `/movie box`), तो स्लैश हटा दें ताकि वह कीवर्ड से मैच हो सके
     if (text.startsWith('/')) {
       text = text.substring(1).trim();
     }
 
-    // फिल्टर चेकिंग (चाहे बिना स्लैश के लिखा हो या स्लैश के साथ)
+    // फिल्टर चेकिंग
     if (customTriggers[chatId]) {
       if (customTriggers[chatId][text]) {
         const triggerData = customTriggers[chatId][text];
@@ -323,8 +346,8 @@ bot.action(/^unban_(.+)$/, async (ctx) => {
 });
 
 bot.launch();
-console.log('FRIDAY V12 Smart Filter Bot is active...');
+console.log('FRIDAY V13 Persistent File-Storage Filter Bot is active...');
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
-          
+                     
