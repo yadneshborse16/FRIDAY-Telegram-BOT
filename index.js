@@ -14,6 +14,7 @@ server.listen(PORT, () => {
 
 const bot = new Telegraf('8804212194:AAGkCSQy3LgD_SVbLBaBREO3RGquKTChiyc');
 
+// यूजर स्टेट्स ट्रैक करने के लिए: { userId: { insults: 0, warnings: 0, name: '' } }
 const userStats = {}; 
 
 // केवल बेसिक सेफ वर्ड्स जो 'छोड़ने' या 'छोटा' के सेंस में आते हैं
@@ -22,18 +23,11 @@ const safeWords = [
   'pachhayat', 'bachha', 'bachho', 'achha', 'achhi'
 ];
 
-// स्टार्स, स्पेस और सभी गालियों/स्लैंग्स (हिंदी, मराठी, इंग्लिश) को पकड़ने वाले पैटर्न्स
-const profanityPatterns = [
-  /m\s*a\s*a?\s*k\s*i\s*[\s\*]*ch\s*u\s*t/gi,
-  /m\s*a\s*d\s*a\s*r\s*\*?\s*h\s*o\s*d/gi,
-  /b\s*h\s*e\s*n\s*c\s*h\s*o\s*d/gi,
-  /b\s*h\s*o\s*s\s*d\s*i\s*w?\s*a?\s*l?\s*a/gi,
-  /ch\s*u\s*t\s*i\s*y/gi,
-  /bh\s*a\s*d\s*w/gi,
-  /g\s*a\s*a?\s*l\s*i/gi,
-  /l\s*a\s*n\s*d/gi,
-  /f\s*u\s*c\s*k/gi,
-  /s\s*h\s*i\s*t\s*(?!at)/gi
+// गालियों की फिक्स लिस्ट
+const badWordsList = [
+  'madarchod', 'madarchodh', 'bhenchod', 'bhenchodh', 'bhosdiwala', 'bhosdike',
+  'chutiya', 'chutiye', 'chutiyapa', 'bhadwa', 'bhadwe', 'bhadva', 'bhadve',
+  'maakichut', 'maki chut', 'gaali', 'lande', 'lode', 'fuck', 'shit'
 ];
 
 async function isAuthorized(ctx, userId) {
@@ -49,6 +43,33 @@ async function isAuthorized(ctx, userId) {
   }
 }
 
+// एडमिन कमांड: /resetwarns (रिप्लाई करके या यूजर आईडी के साथ इस्तेमाल कर सकते हैं)
+bot.command('resetwarns', async (ctx) => {
+  try {
+    if (!(await isAuthorized(ctx, ctx.from.id))) {
+      return ctx.reply("Unauthorized! Only admins can reset warnings.");
+    }
+
+    // अगर किसी मैसेज पर रिप्लाई किया गया है
+    if (ctx.message.reply_to_message) {
+      const targetUserId = ctx.message.reply_to_message.from.id;
+      const targetUserName = ctx.message.reply_to_message.from.first_name || 'User';
+
+      if (userStats[targetUserId]) {
+        userStats[targetUserId].insults = 0;
+        userStats[targetUserId].warnings = 0;
+        return ctx.reply(`🔄 All warnings and strikes have been reset for ${targetUserName} by admin.`);
+      } else {
+        return ctx.reply(`No warnings found for ${targetUserName}.`);
+      }
+    } else {
+      return ctx.reply("Please reply to a user's message with `/resetwarns` to clear their warnings.");
+    }
+  } catch (error) {
+    console.error('Resetwarns error:', error);
+  }
+});
+
 bot.on('text', async (ctx) => {
   try {
     if (ctx.chat.type === 'private') return;
@@ -56,12 +77,12 @@ bot.on('text', async (ctx) => {
     const userId = ctx.from.id;
     const userName = ctx.from.first_name || 'User';
     const chatId = ctx.chat.id;
-    const text = ctx.message.text.toLowerCase();
+    const rawText = ctx.message.text.toLowerCase();
 
     // 1. सेफ वर्ड्स चेक करें
     let isSafe = false;
     for (const safeWord of safeWords) {
-      if (text.includes(safeWord)) {
+      if (rawText.includes(safeWord)) {
         isSafe = true;
         break;
       }
@@ -69,10 +90,13 @@ bot.on('text', async (ctx) => {
 
     if (isSafe) return;
 
-    // 2. गाली डिटेक्ट करें
+    // 2. टेक्स्ट को नॉर्मलाइज करें (सारे स्टार्स *, स्पेस, डैश हटा दें)
+    const cleanedText = rawText.replace(/[\s\*\-\_\.\,\!\@\#\$\%\^\&\(\)\+\=\~\`]+/g, '');
+
+    // 3. गाली मैच करें
     let isProfane = false;
-    for (const pattern of profanityPatterns) {
-      if (pattern.test(text)) {
+    for (const badWord of badWordsList) {
+      if (cleanedText.includes(badWord)) {
         isProfane = true;
         break;
       }
@@ -81,22 +105,22 @@ bot.on('text', async (ctx) => {
     if (isProfane) {
       const userIsAdmin = await isAuthorized(ctx, userId);
 
-      // अगर भेजने वाला एडमिन या ओनर है -> सिर्फ मैसेज उड़ाओ, कोई सजा नहीं
+      // अगर एडमिन या ओनर है -> सिर्फ मैसेज उड़ाओ, कोई म्यूट/बैन नहीं
       if (userIsAdmin) {
         await ctx.deleteMessage();
         return;
       }
 
-      // नॉर्मल यूजर के लिए सख्त एक्शन:
+      // नॉर्मल यूजर के लिए एक्शन
       await ctx.deleteMessage();
 
       if (!userStats[userId]) {
-        userStats[userId] = { insults: 0, warnings: 0 };
+        userStats[userId] = { insults: 0, warnings: 0, name: userName };
       }
 
       userStats[userId].insults += 1;
 
-      // 2 घंटे (120 मिनट) के लिए म्यूट
+      // 2 घंटे के लिए म्यूट
       const muteDurationHours = 2;
       const muteUntil = Math.floor(Date.now() / 1000) + (muteDurationHours * 60 * 60);
       
@@ -116,16 +140,19 @@ bot.on('text', async (ctx) => {
           await ctx.reply(
             `⚠️ Warning [${currentWarnings}/3] issued to ${userName}.\nReason: 10 profanity violations reached.\n🔇 Status: Muted for ${muteDurationHours} hours.`,
             Markup.inlineKeyboard([
-              [Markup.button.callback(`🔊 Unmute ${userName}`, `unmute_${userId}`)]
+              [
+                Markup.button.callback(`🔊 Unmute`, `unmute_${userId}`),
+                Markup.button.callback(`🔄 Reset Warns`, `resetwarns_${userId}`)
+              ]
             ])
           );
         } else {
-          // तीसरा वार्निंग होने पर परमानेंट बैन
+          // तीसरा वार्निंग -> परमानेंट बैन
           await ctx.telegram.banChatMember(chatId, userId);
           await ctx.reply(
-            `🚫 Protocol Finalized: ${userName} has been permanently banned due to 3 cumulative warnings (30 total profanity hits).`,
+            `🚫 Protocol Finalized: ${userName} has been permanently banned due to 3 cumulative warnings.`,
             Markup.inlineKeyboard([
-              [Markup.button.callback(`🔓 Unban ${userName}`, `unban_${userId}`)]
+              [Markup.button.callback(`🔓 Unban`, `unban_${userId}`)]
             ])
           );
           delete userStats[userId];
@@ -134,7 +161,10 @@ bot.on('text', async (ctx) => {
         await ctx.reply(
           `🔇 ${userName} has been muted for ${muteDurationHours} hours.\nReason: Inappropriate language detected. (Strike ${userStats[userId].insults}/10)`,
           Markup.inlineKeyboard([
-            [Markup.button.callback(`🔊 Unmute ${userName}`, `unmute_${userId}`)]
+            [
+              Markup.button.callback(`🔊 Unmute`, `unmute_${userId}`),
+              Markup.button.callback(`🔄 Reset Warns`, `resetwarns_${userId}`)
+            ]
           ])
         );
       }
@@ -144,6 +174,7 @@ bot.on('text', async (ctx) => {
   }
 });
 
+// अनम्यूट बटन का एक्शन (सिर्फ एडमिन)
 bot.action(/^unmute_(.+)$/, async (ctx) => {
   try {
     const userId = ctx.match[1];
@@ -168,6 +199,28 @@ bot.action(/^unmute_(.+)$/, async (ctx) => {
   }
 });
 
+// रिसेट वार्निंग्स बटन का एक्शन (सिर्फ एडमिन)
+bot.action(/^resetwarns_(.+)$/, async (ctx) => {
+  try {
+    const userId = ctx.match[1];
+    if (!(await isAuthorized(ctx, ctx.from.id))) {
+      return ctx.answerCbQuery("Unauthorized action! Only admins can use this.", { show_alert: true });
+    }
+
+    if (userStats[userId]) {
+      userStats[userId].insults = 0;
+      userStats[userId].warnings = 0;
+    }
+
+    await ctx.answerCbQuery("All warnings and strikes reset successfully!");
+    await ctx.editMessageText("🔄 User's warnings and strikes have been completely reset by an admin.");
+  } catch (error) {
+    console.error('Reset warns error:', error);
+    await ctx.answerCbQuery("Failed to reset warnings.", { show_alert: true });
+  }
+});
+
+// अनबैन बटन का एक्शन (सिर्फ एडमिन)
 bot.action(/^unban_(.+)$/, async (ctx) => {
   try {
     const userId = ctx.match[1];
@@ -185,8 +238,8 @@ bot.action(/^unban_(.+)$/, async (ctx) => {
 });
 
 bot.launch();
-console.log('FRIDAY V3 Strict Moderation Bot is active...');
+console.log('FRIDAY V5 Moderation Bot with Reset Warns is active...');
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
-  
+                                       
