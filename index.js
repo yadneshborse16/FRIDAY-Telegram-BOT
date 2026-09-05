@@ -14,7 +14,7 @@ server.listen(PORT, () => {
 const bot = new Telegraf('8804212194:AAGkCSQy3LgD_SVbLBaBREO3RGquKTChiyc');
 
 const userStats = {}; 
-const customTriggers = {}; // { chatId: { keyword: { type, content, ... } } }
+const customTriggers = {}; // { chatId: { keyword: { from_chat_id, message_id } } }
 
 const safeWords = [
   'chhod', 'chhod do', 'chhodo', 'chhota', 'chhoti', 'chhotu', 
@@ -41,7 +41,7 @@ async function isAuthorized(ctx, userId) {
   }
 }
 
-// 1. /add कमांड: फाइल, फोटो, डॉक्यूमेंट या टेक्स्ट को कीवर्ड से सेव करना (सिर्फ एडमिन)
+// 1. /add कमांड: रिप्लाई किए गए मैसेज की आईडी सेव करना (सिर्फ एडमिन)
 bot.command('add', async (ctx) => {
   try {
     const chatId = ctx.chat.id;
@@ -53,7 +53,7 @@ bot.command('add', async (ctx) => {
 
     const args = ctx.message.text.split(' ');
     if (args.length < 2 || !ctx.message.reply_to_message) {
-      return ctx.reply("Usage: Reply to any message/file/APK with `/add [keyword]`");
+      return ctx.reply("Usage: Reply to any message/APK/file with `/add [keyword]`");
     }
 
     const keyword = args[1].toLowerCase();
@@ -63,27 +63,13 @@ bot.command('add', async (ctx) => {
       customTriggers[chatId] = {};
     }
 
-    // चेक करें कि रिप्लाई किस तरह के कंटेंट पर किया गया है (APK, Document, Photo, Video, Text आदि)
-    let triggerData = {};
+    // ओरिजिनल मैसेज की चैट आईडी और मैसेज आईडी सेव करें ताकि उसे फॉरवर्ड किया जा सके
+    customTriggers[chatId][keyword] = {
+      from_chat_id: targetMsg.chat.id,
+      message_id: targetMsg.message_id
+    };
 
-    if (targetMsg.document) {
-      triggerData = { type: 'document', file_id: targetMsg.document.file_id, caption: targetMsg.caption || '' };
-    } else if (targetMsg.photo) {
-      // फोटो के कई साइज़ होते हैं, सबसे बड़े वाला (आखिरी इंडेक्स) लेते हैं
-      const photo = targetMsg.photo[targetMsg.photo.length - 1];
-      triggerData = { type: 'photo', file_id: photo.file_id, caption: targetMsg.caption || '' };
-    } else if (targetMsg.video) {
-      triggerData = { type: 'video', file_id: targetMsg.video.file_id, caption: targetMsg.caption || '' };
-    } else if (targetMsg.audio) {
-      triggerData = { type: 'audio', file_id: targetMsg.audio.file_id, caption: targetMsg.caption || '' };
-    } else if (targetMsg.text) {
-      triggerData = { type: 'text', text: targetMsg.text };
-    } else {
-      triggerData = { type: 'text', text: "[Unsupported media type]" };
-    }
-
-    customTriggers[chatId][keyword] = triggerData;
-    return ctx.reply(`✅ Success! Trigger /${keyword} has been linked to the replied item.`);
+    return ctx.reply(`✅ Success! Trigger /${keyword} has been linked to the replied message.`);
   } catch (error) {
     console.error('Add trigger error:', error);
   }
@@ -176,19 +162,8 @@ bot.on('text', async (ctx) => {
       const commandKey = text.substring(1).toLowerCase();
       if (customTriggers[chatId] && customTriggers[chatId][commandKey]) {
         const trigger = customTriggers[chatId][commandKey];
-        
-        // सेव किए गए टाइप के अनुसार फाइल या टेक्स्ट वापस भेजें
-        if (trigger.type === 'document') {
-          return ctx.replyWithDocument(trigger.file_id, { caption: trigger.caption });
-        } else if (trigger.type === 'photo') {
-          return ctx.replyWithPhoto(trigger.file_id, { caption: trigger.caption });
-        } else if (trigger.type === 'video') {
-          return ctx.replyWithVideo(trigger.file_id, { caption: trigger.caption });
-        } else if (trigger.type === 'audio') {
-          return ctx.replyWithAudio(trigger.file_id, { caption: trigger.caption });
-        } else {
-          return ctx.reply(trigger.text);
-        }
+        // ओरिजिनल मैसेज को सीधे ग्रुप में फॉरवर्ड कर देगा (चाहे वह APK हो, फाइल हो या टेक्स्ट)
+        return ctx.telegram.forwardMessage(chatId, trigger.from_chat_id, trigger.message_id);
       }
       return; 
     }
@@ -345,8 +320,7 @@ bot.action(/^unban_(.+)$/, async (ctx) => {
 });
 
 bot.launch();
-console.log('FRIDAY V8 Media & Trigger Bot is active...');
+console.log('FRIDAY V9 Forward-Trigger Bot is active...');
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
-    
