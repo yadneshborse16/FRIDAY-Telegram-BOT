@@ -41,7 +41,7 @@ async function isAuthorized(ctx, userId) {
   }
 }
 
-// 1. /add कमांड: अब स्पेस वाले कीवर्ड्स (जैसे 'movie box') भी पूरी तरह सेव होंगे
+// 1. /add कमांड: किसी मैसेज/फाइल पर रिप्लाई करके `/add movie box` लिखना
 bot.command('add', async (ctx) => {
   try {
     const chatId = ctx.chat.id;
@@ -51,13 +51,14 @@ bot.command('add', async (ctx) => {
       return ctx.reply("Unauthorized! Only admins can use /add.");
     }
 
-    const textParts = ctx.message.text.split(' ');
-    if (textParts.length < 2 || !ctx.message.reply_to_message) {
+    const fullText = ctx.message.text.trim();
+    // `/add` के बाद का हिस्सा कीवर्ड बनेगा (जैसे 'movie box')
+    const keyword = fullText.substring(4).trim().toLowerCase();
+    
+    if (!keyword || !ctx.message.reply_to_message) {
       return ctx.reply("Usage: Reply to any message/APK/file with `/add [keyword]`");
     }
 
-    // पहला शब्द '/add' है, उसके बाद का पूरा टेक्स्ट कीवर्ड बन जाएगा (जैसे 'movie box')
-    const keyword = ctx.message.text.substring(4).trim().toLowerCase();
     const targetMsg = ctx.message.reply_to_message;
 
     if (!customTriggers[chatId]) {
@@ -69,7 +70,7 @@ bot.command('add', async (ctx) => {
       message_id: targetMsg.message_id
     };
 
-    return ctx.reply(`✅ Filter saved! Now typing '${keyword}' will trigger the response.`);
+    return ctx.reply(`✅ Filter saved successfully for '${keyword}'!`);
   } catch (error) {
     console.error('Add filter error:', error);
   }
@@ -145,36 +146,39 @@ bot.command('resetwarns', async (ctx) => {
   }
 });
 
-// टेक्स्ट मॉडरेशन और रोस-बोट स्टाइल फिल्टर चेकर
+// टेक्स्ट मॉडरेशन और स्मार्ट फिल्टर चेकर (चाहे स्लैश हो या न हो)
 bot.on('text', async (ctx) => {
   try {
     if (ctx.chat.type === 'private') return;
 
     const chatId = ctx.chat.id;
-    const text = ctx.message.text.trim();
+    let text = ctx.message.text.trim().toLowerCase();
     const userId = ctx.from.id;
     const userName = ctx.from.first_name || 'User';
     const userIsAdmin = await isAuthorized(ctx, userId);
 
-    if (text.startsWith('/')) {
+    // यदि मैसेज `/add`, `/remove` जैसी कोई सिस्टम कमांड है, तो इसे बाईपास करें
+    if (text.startsWith('/add') || text.startsWith('/remove') || text.startsWith('/added') || text.startsWith('/resetwarns')) {
       return;
     }
 
-    const lowerText = text.toLowerCase();
+    // अगर यूजर ने आगे '/' लगाया है (जैसे `/movie box`), तो स्लैश हटा दें ताकि वह कीवर्ड से मैच हो सके
+    if (text.startsWith('/')) {
+      text = text.substring(1).trim();
+    }
+
+    // फिल्टर चेकिंग (चाहे बिना स्लैश के लिखा हो या स्लैश के साथ)
     if (customTriggers[chatId]) {
-      for (const [keyword, triggerData] of Object.entries(customTriggers[chatId])) {
-        if (lowerText === keyword || lowerText.includes(keyword)) {
-          return ctx.telegram.forwardMessage(chatId, triggerData.from_chat_id, triggerData.message_id);
-        }
+      if (customTriggers[chatId][text]) {
+        const triggerData = customTriggers[chatId][text];
+        return ctx.telegram.forwardMessage(chatId, triggerData.from_chat_id, triggerData.message_id);
       }
     }
 
     // --- गालियों और मॉडरेशन का चेकिंग एरिया ---
-    const rawText = text.toLowerCase();
-
     let isSafe = false;
     for (const safeWord of safeWords) {
-      if (rawText.includes(safeWord)) {
+      if (text.includes(safeWord)) {
         isSafe = true;
         break;
       }
@@ -182,7 +186,7 @@ bot.on('text', async (ctx) => {
 
     if (isSafe) return;
 
-    const cleanedText = rawText.replace(/[\s\*\-\_\.\,\!\@\#\$\%\^\&\(\)\+\=\~\`]+/g, '');
+    const cleanedText = text.replace(/[\s\*\-\_\.\,\!\@\#\$\%\^\&\(\)\+\=\~\`]+/g, '');
 
     let isProfane = false;
     for (const badWord of badWordsList) {
@@ -319,8 +323,8 @@ bot.action(/^unban_(.+)$/, async (ctx) => {
 });
 
 bot.launch();
-console.log('FRIDAY V11 Multi-Word Filter Bot is active...');
+console.log('FRIDAY V12 Smart Filter Bot is active...');
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
-        
+          
