@@ -41,7 +41,7 @@ async function isAuthorized(ctx, userId) {
   }
 }
 
-// 1. /add कमांड: रिप्लाई किए गए मैसेज की आईडी सेव करना (सिर्फ एडमिन)
+// 1. /add कमांड: किसी मैसेज/फाइल पर रिप्लाई करके `/add capcut` लिखना (सिर्फ एडमिन)
 bot.command('add', async (ctx) => {
   try {
     const chatId = ctx.chat.id;
@@ -63,29 +63,28 @@ bot.command('add', async (ctx) => {
       customTriggers[chatId] = {};
     }
 
-    // ओरिजिनल मैसेज की चैट आईडी और मैसेज आईडी सेव करें ताकि उसे फॉरवर्ड किया जा सके
     customTriggers[chatId][keyword] = {
       from_chat_id: targetMsg.chat.id,
       message_id: targetMsg.message_id
     };
 
-    return ctx.reply(`✅ Success! Trigger /${keyword} has been linked to the replied message.`);
+    return ctx.reply(`✅ Filter saved! Now typing '${keyword}' will trigger the response.`);
   } catch (error) {
-    console.error('Add trigger error:', error);
+    console.error('Add filter error:', error);
   }
 });
 
-// 2. /added कमांड: सभी सेव किए गए कीवर्ड्स देखना
+// 2. /added कमांड: सभी सेव किए गए फिल्टर्स देखना (कोई भी कर सकता है)
 bot.command('added', async (ctx) => {
   try {
     const chatId = ctx.chat.id;
     if (!customTriggers[chatId] || Object.keys(customTriggers[chatId]).length === 0) {
-      return ctx.reply("No custom triggers have been added in this group yet.");
+      return ctx.reply("No filters have been added in this group yet.");
     }
 
-    let list = "📌 **Saved Custom Triggers:**\n";
+    let list = "📌 **Saved Filters:**\n";
     for (const key of Object.keys(customTriggers[chatId])) {
-      list += `• /${key}\n`;
+      list += `• ${key}\n`;
     }
     return ctx.replyWithMarkdown(list);
   } catch (error) {
@@ -93,7 +92,7 @@ bot.command('added', async (ctx) => {
   }
 });
 
-// 3. /remove कमांड: कीवर्ड हटाना (सिर्फ एडमिन)
+// 3. /remove कमांड: फिल्टर हटाना (सिर्फ एडमिन)
 bot.command('remove', async (ctx) => {
   try {
     const chatId = ctx.chat.id;
@@ -112,12 +111,12 @@ bot.command('remove', async (ctx) => {
 
     if (customTriggers[chatId] && customTriggers[chatId][keyword]) {
       delete customTriggers[chatId][keyword];
-      return ctx.reply(`🗑️ Trigger /${keyword} has been successfully removed.`);
+      return ctx.reply(`🗑️ Filter '${keyword}' has been successfully removed.`);
     } else {
-      return ctx.reply(`❌ Keyword /${keyword} does not exist.`);
+      return ctx.reply(`❌ Filter '${keyword}' does not exist.`);
     }
   } catch (error) {
-    console.error('Remove trigger error:', error);
+    console.error('Remove filter error:', error);
   }
 });
 
@@ -147,28 +146,34 @@ bot.command('resetwarns', async (ctx) => {
   }
 });
 
-// टेक्स्ट मॉडरेशन और कस्टम ट्रिगर चेकर
+// टेक्स्ट मॉडरेशन और रोस-बोट स्टाइल फिल्टर चेकर
 bot.on('text', async (ctx) => {
   try {
     if (ctx.chat.type === 'private') return;
 
     const chatId = ctx.chat.id;
-    const text = ctx.message.text;
+    const text = ctx.message.text.trim();
     const userId = ctx.from.id;
     const userName = ctx.from.first_name || 'User';
+    const userIsAdmin = await isAuthorized(ctx, userId);
 
-    // चेक करें कि क्या यह मैसेज किसी कस्टम ट्रिगर (जैसे /capcut) से मैच होता है
+    // यदि मैसेज किसी एडमिन कमांड से शुरू होता है (जैसे /add, /remove, आदि), तो मॉडरेशन छोड़ दें
     if (text.startsWith('/')) {
-      const commandKey = text.substring(1).toLowerCase();
-      if (customTriggers[chatId] && customTriggers[chatId][commandKey]) {
-        const trigger = customTriggers[chatId][commandKey];
-        // ओरिजिनल मैसेज को सीधे ग्रुप में फॉरवर्ड कर देगा (चाहे वह APK हो, फाइल हो या टेक्स्ट)
-        return ctx.telegram.forwardMessage(chatId, trigger.from_chat_id, trigger.message_id);
-      }
-      return; 
+      return;
     }
 
-    const userIsAdmin = await isAuthorized(ctx, userId);
+    // रोज़-बोट स्टाइल फिल्टर चेक: यदि यूजर ने सीधा शब्द लिखा है (जैसे 'capcut')
+    const lowerText = text.toLowerCase();
+    if (customTriggers[chatId]) {
+      // यदि पूरा मैसेज या मैसेज का कोई हिस्सा उस फिल्टर कीवर्ड से मैच होता है
+      for (const [keyword, triggerData] of Object.entries(customTriggers[chatId])) {
+        if (lowerText === keyword || lowerText.includes(keyword)) {
+          return ctx.telegram.forwardMessage(chatId, triggerData.from_chat_id, triggerData.message_id);
+        }
+      }
+    }
+
+    // --- गालियों और मॉडरेशन का चेकिंग एरिया ---
     const rawText = text.toLowerCase();
 
     // सेफ वर्ड्स चेक करें
@@ -182,7 +187,7 @@ bot.on('text', async (ctx) => {
 
     if (isSafe) return;
 
-    // टेक्स्ट नॉर्मलाइज़र (सारे स्टार्स और स्पेसेस हटाकर गाली पकड़ना)
+    // टेक्स्ट नॉर्मलाइज़र (सारे स्टार्स, स्पेस और सिंबल हटाकर गाली पकड़ना)
     const cleanedText = rawText.replace(/[\s\*\-\_\.\,\!\@\#\$\%\^\&\(\)\+\=\~\`]+/g, '');
 
     let isProfane = false;
@@ -320,7 +325,8 @@ bot.action(/^unban_(.+)$/, async (ctx) => {
 });
 
 bot.launch();
-console.log('FRIDAY V9 Forward-Trigger Bot is active...');
+console.log('FRIDAY V10 Rose-Style Filter Bot is active...');
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
+            
