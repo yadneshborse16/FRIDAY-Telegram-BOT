@@ -41,7 +41,7 @@ async function isAuthorized(ctx, userId) {
   }
 }
 
-// 1. /add कमांड: किसी मैसेज/फाइल पर रिप्लाई करके `/add capcut` लिखना (सिर्फ एडमिन)
+// 1. /add कमांड: अब स्पेस वाले कीवर्ड्स (जैसे 'movie box') भी पूरी तरह सेव होंगे
 bot.command('add', async (ctx) => {
   try {
     const chatId = ctx.chat.id;
@@ -51,12 +51,13 @@ bot.command('add', async (ctx) => {
       return ctx.reply("Unauthorized! Only admins can use /add.");
     }
 
-    const args = ctx.message.text.split(' ');
-    if (args.length < 2 || !ctx.message.reply_to_message) {
+    const textParts = ctx.message.text.split(' ');
+    if (textParts.length < 2 || !ctx.message.reply_to_message) {
       return ctx.reply("Usage: Reply to any message/APK/file with `/add [keyword]`");
     }
 
-    const keyword = args[1].toLowerCase();
+    // पहला शब्द '/add' है, उसके बाद का पूरा टेक्स्ट कीवर्ड बन जाएगा (जैसे 'movie box')
+    const keyword = ctx.message.text.substring(4).trim().toLowerCase();
     const targetMsg = ctx.message.reply_to_message;
 
     if (!customTriggers[chatId]) {
@@ -74,7 +75,7 @@ bot.command('add', async (ctx) => {
   }
 });
 
-// 2. /added कमांड: सभी सेव किए गए फिल्टर्स देखना (कोई भी कर सकता है)
+// 2. /added कमांड: सभी सेव किए गए फिल्टर्स देखना
 bot.command('added', async (ctx) => {
   try {
     const chatId = ctx.chat.id;
@@ -92,7 +93,7 @@ bot.command('added', async (ctx) => {
   }
 });
 
-// 3. /remove कमांड: फिल्टर हटाना (सिर्फ एडमिन)
+// 3. /remove कमांड: फिल्टर हटाना
 bot.command('remove', async (ctx) => {
   try {
     const chatId = ctx.chat.id;
@@ -102,12 +103,10 @@ bot.command('remove', async (ctx) => {
       return ctx.reply("Unauthorized! Only admins can use /remove.");
     }
 
-    const args = ctx.message.text.split(' ');
-    if (args.length < 2) {
+    const keyword = ctx.message.text.substring(7).trim().toLowerCase();
+    if (!keyword) {
       return ctx.reply("Usage: `/remove [keyword]`");
     }
-
-    const keyword = args[1].toLowerCase();
 
     if (customTriggers[chatId] && customTriggers[chatId][keyword]) {
       delete customTriggers[chatId][keyword];
@@ -157,15 +156,12 @@ bot.on('text', async (ctx) => {
     const userName = ctx.from.first_name || 'User';
     const userIsAdmin = await isAuthorized(ctx, userId);
 
-    // यदि मैसेज किसी एडमिन कमांड से शुरू होता है (जैसे /add, /remove, आदि), तो मॉडरेशन छोड़ दें
     if (text.startsWith('/')) {
       return;
     }
 
-    // रोज़-बोट स्टाइल फिल्टर चेक: यदि यूजर ने सीधा शब्द लिखा है (जैसे 'capcut')
     const lowerText = text.toLowerCase();
     if (customTriggers[chatId]) {
-      // यदि पूरा मैसेज या मैसेज का कोई हिस्सा उस फिल्टर कीवर्ड से मैच होता है
       for (const [keyword, triggerData] of Object.entries(customTriggers[chatId])) {
         if (lowerText === keyword || lowerText.includes(keyword)) {
           return ctx.telegram.forwardMessage(chatId, triggerData.from_chat_id, triggerData.message_id);
@@ -176,7 +172,6 @@ bot.on('text', async (ctx) => {
     // --- गालियों और मॉडरेशन का चेकिंग एरिया ---
     const rawText = text.toLowerCase();
 
-    // सेफ वर्ड्स चेक करें
     let isSafe = false;
     for (const safeWord of safeWords) {
       if (rawText.includes(safeWord)) {
@@ -187,7 +182,6 @@ bot.on('text', async (ctx) => {
 
     if (isSafe) return;
 
-    // टेक्स्ट नॉर्मलाइज़र (सारे स्टार्स, स्पेस और सिंबल हटाकर गाली पकड़ना)
     const cleanedText = rawText.replace(/[\s\*\-\_\.\,\!\@\#\$\%\^\&\(\)\+\=\~\`]+/g, '');
 
     let isProfane = false;
@@ -325,8 +319,8 @@ bot.action(/^unban_(.+)$/, async (ctx) => {
 });
 
 bot.launch();
-console.log('FRIDAY V10 Rose-Style Filter Bot is active...');
+console.log('FRIDAY V11 Multi-Word Filter Bot is active...');
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
-            
+        
