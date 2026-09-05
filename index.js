@@ -1,7 +1,6 @@
 const { Telegraf, Markup } = require('telegraf');
 const http = require('http');
 
-// Render वेब सर्विस पोर्ट बाइंडिंग के लिए छोटा HTTP सर्वर
 const PORT = process.env.PORT || 3000;
 const server = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -14,20 +13,20 @@ server.listen(PORT, () => {
 
 const bot = new Telegraf('8804212194:AAGkCSQy3LgD_SVbLBaBREO3RGquKTChiyc');
 
-// यूजर स्टेट्स ट्रैक करने के लिए: { userId: { insults: 0, warnings: 0, name: '' } }
+// डेटा स्टोर करने के लिए
 const userStats = {}; 
+const customTriggers = {}; // { chatId: { keyword: responseText } }
 
-// केवल बेसिक सेफ वर्ड्स जो 'छोड़ने' या 'छोटा' के सेंस में आते हैं
 const safeWords = [
   'chhod', 'chhod do', 'chhodo', 'chhota', 'chhoti', 'chhotu', 
   'pachhayat', 'bachha', 'bachho', 'achha', 'achhi'
 ];
 
-// गालियों की फिक्स लिस्ट
 const badWordsList = [
   'madarchod', 'madarchodh', 'bhenchod', 'bhenchodh', 'bhosdiwala', 'bhosdike',
   'chutiya', 'chutiye', 'chutiyapa', 'bhadwa', 'bhadwe', 'bhadva', 'bhadve',
-  'maakichut', 'maki chut', 'gaali', 'lande', 'lode', 'fuck', 'shit'
+  'maakichut', 'maki chut', 'gaali', 'lande', 'lode', 'laude', 'fuck', 'shit',
+  'lavde', 'lauda', 'bhosda', 'choot', 'chut', 'gandu', 'gaand', 'gaandu'
 ];
 
 async function isAuthorized(ctx, userId) {
@@ -43,14 +42,89 @@ async function isAuthorized(ctx, userId) {
   }
 }
 
-// एडमिन कमांड: /resetwarns (रिप्लाई करके या यूजर आईडी के साथ इस्तेमाल कर सकते हैं)
+// 1. /add कमांड: किसी मैसेज को रिप्लाई करके `/add keyword` लिखना (सिर्फ एडमिन)
+bot.command('add', async (ctx) => {
+  try {
+    const chatId = ctx.chat.id;
+    const userId = ctx.from.id;
+
+    if (!(await isAuthorized(ctx, userId))) {
+      return ctx.reply("Unauthorized! Only admins can use /add.");
+    }
+
+    const args = ctx.message.text.split(' ');
+    if (args.length < 2 || !ctx.message.reply_to_message) {
+      return ctx.reply("Usage: Reply to a message with `/add [keyword]`");
+    }
+
+    const keyword = args[1].toLowerCase();
+    const targetMsg = ctx.message.reply_to_message;
+
+    if (!customTriggers[chatId]) {
+      customTriggers[chatId] = {};
+    }
+
+    // मैसेज का टेक्स्ट या कैप्शन सेव करें
+    customTriggers[chatId][keyword] = targetMsg.text || targetMsg.caption || "[Media/File Saved]";
+    return ctx.reply(`✅ Success! Trigger /${keyword} has been added.`);
+  } catch (error) {
+    console.error('Add trigger error:', error);
+  }
+});
+
+// 2. /added कमांड: सभी सेव किए गए कीवर्ड्स देखना (कोई भी कर सकता है)
+bot.command('added', async (ctx) => {
+  try {
+    const chatId = ctx.chat.id;
+    if (!customTriggers[chatId] || Object.keys(customTriggers[chatId]).length === 0) {
+      return ctx.reply("No custom triggers have been added in this group yet.");
+    }
+
+    let list = "📌 **Saved Custom Triggers:**\n";
+    for (const key of Object.keys(customTriggers[chatId])) {
+      list += `• /${key}\n`;
+    }
+    return ctx.replyWithMarkdown(list);
+  } catch (error) {
+    console.error('Added list error:', error);
+  }
+});
+
+// 3. /remove कमांड: कीवर्ड हटाना (सिर्फ एडमिन)
+bot.command('remove', async (ctx) => {
+  try {
+    const chatId = ctx.chat.id;
+    const userId = ctx.from.id;
+
+    if (!(await isAuthorized(ctx, userId))) {
+      return ctx.reply("Unauthorized! Only admins can use /remove.");
+    }
+
+    const args = ctx.message.text.split(' ');
+    if (args.length < 2) {
+      return ctx.reply("Usage: `/remove [keyword]`");
+    }
+
+    const keyword = args[1].toLowerCase();
+
+    if (customTriggers[chatId] && customTriggers[chatId][keyword]) {
+      delete customTriggers[chatId][keyword];
+      return ctx.reply(`🗑️ Trigger /${keyword} has been successfully removed.`);
+    } else {
+      return ctx.reply(`❌ Keyword /${keyword} does not exist.`);
+    }
+  } catch (error) {
+    console.error('Remove trigger error:', error);
+  }
+});
+
+// एडमिन कमांड: /resetwarns
 bot.command('resetwarns', async (ctx) => {
   try {
     if (!(await isAuthorized(ctx, ctx.from.id))) {
       return ctx.reply("Unauthorized! Only admins can reset warnings.");
     }
 
-    // अगर किसी मैसेज पर रिप्लाई किया गया है
     if (ctx.message.reply_to_message) {
       const targetUserId = ctx.message.reply_to_message.from.id;
       const targetUserName = ctx.message.reply_to_message.from.first_name || 'User';
@@ -70,16 +144,31 @@ bot.command('resetwarns', async (ctx) => {
   }
 });
 
+// टेक्स्ट मॉडरेशन और कस्टम ट्रिगर चेकर
 bot.on('text', async (ctx) => {
   try {
     if (ctx.chat.type === 'private') return;
 
+    const chatId = ctx.chat.id;
+    const text = ctx.message.text;
     const userId = ctx.from.id;
     const userName = ctx.from.first_name || 'User';
-    const chatId = ctx.chat.id;
-    const rawText = ctx.message.text.toLowerCase();
 
-    // 1. सेफ वर्ड्स चेक करें
+    // चेक करें कि क्या यह मैसेज किसी कस्टम ट्रिगर (जैसे /capcut) से मैच होता है
+    if (text.startsWith('/')) {
+      const commandKey = text.substring(1).toLowerCase();
+      if (customTriggers[chatId] && customTriggers[chatId][commandKey]) {
+        return ctx.reply(customTriggers[chatId][commandKey]);
+      }
+      return; // अगर नॉर्मल कमांड है तो मॉडरेशन में नहीं जाएगी
+    }
+
+    // अगर भेजने वाला एडमिन या ओनर है
+    const userIsAdmin = await isAuthorized(ctx, userId);
+
+    const rawText = text.toLowerCase();
+
+    // सेफ वर्ड्स चेक करें
     let isSafe = false;
     for (const safeWord of safeWords) {
       if (rawText.includes(safeWord)) {
@@ -90,10 +179,10 @@ bot.on('text', async (ctx) => {
 
     if (isSafe) return;
 
-    // 2. टेक्स्ट को नॉर्मलाइज करें (सारे स्टार्स *, स्पेस, डैश हटा दें)
+    // टेक्स्ट को नॉर्मलाइज करें
     const cleanedText = rawText.replace(/[\s\*\-\_\.\,\!\@\#\$\%\^\&\(\)\+\=\~\`]+/g, '');
 
-    // 3. गाली मैच करें
+    // गाली मैच करें
     let isProfane = false;
     for (const badWord of badWordsList) {
       if (cleanedText.includes(badWord)) {
@@ -103,15 +192,13 @@ bot.on('text', async (ctx) => {
     }
 
     if (isProfane) {
-      const userIsAdmin = await isAuthorized(ctx, userId);
-
-      // अगर एडमिन या ओनर है -> सिर्फ मैसेज उड़ाओ, कोई म्यूट/बैन नहीं
+      // अगर एडमिन है -> सिर्फ मैसेज डिलीट, कोई म्यूट/बैन नहीं
       if (userIsAdmin) {
         await ctx.deleteMessage();
         return;
       }
 
-      // नॉर्मल यूजर के लिए एक्शन
+      // नॉर्मल यूजर के लिए सख्त एक्शन
       await ctx.deleteMessage();
 
       if (!userStats[userId]) {
@@ -120,7 +207,6 @@ bot.on('text', async (ctx) => {
 
       userStats[userId].insults += 1;
 
-      // 2 घंटे के लिए म्यूट
       const muteDurationHours = 2;
       const muteUntil = Math.floor(Date.now() / 1000) + (muteDurationHours * 60 * 60);
       
@@ -129,7 +215,6 @@ bot.on('text', async (ctx) => {
         permissions: { can_send_messages: false }
       });
 
-      // गालियों की संख्या चेक करें (हर 10 पर वार्निंग)
       if (userStats[userId].insults >= 10) {
         userStats[userId].warnings += 1;
         userStats[userId].insults = 0; 
@@ -147,7 +232,6 @@ bot.on('text', async (ctx) => {
             ])
           );
         } else {
-          // तीसरा वार्निंग -> परमानेंट बैन
           await ctx.telegram.banChatMember(chatId, userId);
           await ctx.reply(
             `🚫 Protocol Finalized: ${userName} has been permanently banned due to 3 cumulative warnings.`,
@@ -174,7 +258,7 @@ bot.on('text', async (ctx) => {
   }
 });
 
-// अनम्यूट बटन का एक्शन (सिर्फ एडमिन)
+// बटन एक्शंस
 bot.action(/^unmute_(.+)$/, async (ctx) => {
   try {
     const userId = ctx.match[1];
@@ -199,7 +283,6 @@ bot.action(/^unmute_(.+)$/, async (ctx) => {
   }
 });
 
-// रिसेट वार्निंग्स बटन का एक्शन (सिर्फ एडमिन)
 bot.action(/^resetwarns_(.+)$/, async (ctx) => {
   try {
     const userId = ctx.match[1];
@@ -220,7 +303,6 @@ bot.action(/^resetwarns_(.+)$/, async (ctx) => {
   }
 });
 
-// अनबैन बटन का एक्शन (सिर्फ एडमिन)
 bot.action(/^unban_(.+)$/, async (ctx) => {
   try {
     const userId = ctx.match[1];
@@ -238,8 +320,8 @@ bot.action(/^unban_(.+)$/, async (ctx) => {
 });
 
 bot.launch();
-console.log('FRIDAY V5 Moderation Bot with Reset Warns is active...');
+console.log('FRIDAY V7 Custom Triggers & Moderation Bot is active...');
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
-                                       
+    
